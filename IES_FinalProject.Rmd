@@ -1,0 +1,287 @@
+---
+title: "IESProject_Final"
+author: "Naman Ashar"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+I plan on predicting the baseline histological stage on the basis of different factors present in the HCV dataset. For this purpose, I have tried using KNN, Naive Bayes, SVM, Neural network and logistic regression. 
+
+
+
+
+Data Acquisition (CSV or flatfile)
+
+
+```{r}
+#Data Acquisition
+data_hcv<- read.csv("C:/Users/Naman/Documents/HCV-Egy-Data.csv", header = TRUE,stringsAsFactors = TRUE)
+head(data_hcv)
+```
+
+
+Data Exploration
+
+
+```{r}
+#Looking at the HCV data with the help of summary and str function. This gives us an idea about all the recordings and levels of RBC, WBC, progression of diseases and symptoms like Jaundice, headache, vomitting and nausea, bone ache, HGB, Platelet count, ALT presence at different time intervals (therapy timing) and baseline histological staging which tells us how severely the patient is affected (prognosis levels) which is defined by the stages 1, 2, 3 and 4. No Fibrosis (F0), Portal Fibrosis (F1), Few Septa (F2), Many Septa (F3), Cirrhosis (F4). 
+str(data_hcv)
+summary(data_hcv)
+
+#Exploratory Data Plots
+hist(data_hcv[, 1], main="Histogram for Age", xlab="Age")
+hist(data_hcv$WBC, main="Histogram for WBC Count", xlab="WBC Count")
+hist(data_hcv$AST.1, main = "Aspartate Transaminase Ratio", xlab = "AST")
+hist(data_hcv$Baselinehistological.staging, main="Stages of Fibrosis", xlab = "Stages")
+hist(data_hcv$BMI, main="BMI", xlab="BMI range")
+#Since stages are categorical in nature, the plot obtained shows similar heights of the bars in the histogram
+
+#Collinearity analysis
+library(psych)
+#Adding columns to check if the columns are correlated and have biological significance
+pairs.panels(data_hcv[,c("Age", "Gender", "BMI", "WBC", "RNA.EOT", "Baselinehistological.staging")])
+#As we can see, some columns are normally distributed while some are not. There is barely any collinearity seen in the data.
+
+#Correlation plot
+library(corrplot)
+corrplot.mixed(cor(data_hcv [1:10, 1:10], use = "pairwise.complete.obs"))
+#A negative correlation can be found at some instances through the corrplot function. 
+
+#Outlier detection
+#Outliers are detected using standard deviation. Columns and the rows which stand as outliers are printed. 
+for (i in 1:ncol(data_hcv))
+  {
+meanc <- mean(data_hcv[,i])
+sdc <- sd(data_hcv[,i])
+sdc <- sdc*2
+print(colnames(data_hcv[i]))
+print(which(data_hcv[,i] > meanc + sdc | data_hcv[,i] < meanc - sdc)) 
+}
+#There are outliers seen in the dataset but they haven't been excluded. This is because there is a significant drop in the number of patients. But it's important to note that sdc*2 which is 2 times (+/-) the standard deviation is consdiered. This may not be relevant for the dataset. Any observations beyond this are considered as outliers which might not necessarily be the case. 
+```
+
+
+Data Cleaning and Shaping
+
+
+```{r}
+
+#PCA Plots and Analysis
+library(factoextra)
+pca.new<- prcomp(data_hcv)
+fviz_eig(pca.new, scale=FALSE, center=FALSE)
+#PCA visualisation tells us the important components of the data which will then be used for analysis from the HCV dataset
+
+#Normalization
+Bstage <- as.factor(data_hcv$Baselinehistological.staging)
+#Assigning as.factor to all columns of the dataset
+
+#Using min-max normalization method
+normalize <- function(x){
+  return ((x-min(x))/(max(x)-min(x)))
+}
+#min-max normalization gives us the values between 0-1 in the dataset
+
+#Applying normalization to the dataset
+data_hcv <- as.data.frame(apply(data_hcv[1:ncol(data_hcv)], 2, normalize))
+data_hcv$Baselinehistological.staging <- Bstage
+#Bstage is assigned to the last column of the data
+
+#Check if the data has been normalized
+summary(data_hcv)
+
+#As we can see from the summary function, the data has been normalized
+
+```
+
+
+Model Construction and Evaluation
+Here, I have attempted various algorithms on the dataset. Considering that the UCI Repository defines this dataset as a classification dataset, I have used KNN, Naive Bayes, SVM and decision tree. I have also attempted to construct a neural network and a regression model with backtracking. Packages like party, caret, e1071, class and neural net are used.  
+
+
+```{r}
+#SVM
+library(e1071)
+library(caret)
+model_svm1<- svm(Baselinehistological.staging ~., data = data_hcv)
+predict_svm1 <- predict(model_svm1, data_hcv)
+confusionMatrix(predict_svm1, data_hcv$Baselinehistological.staging)
+#Here, the whole dataset is considered for SVM and accuracy is checked for
+
+#Decision tree
+library(party)
+model_dt1<- ctree(Baselinehistological.staging ~., data =data_hcv)
+predict_dt1<- predict(model_dt1, data_hcv)
+confusionMatrix(predict_dt1, data_hcv$Baselinehistological.staging)
+
+#Naive Bayes algorithm
+model_nb1<- naiveBayes(Baselinehistological.staging ~., data =data_hcv)
+predict_nb1 <- predict(model_nb1, data_hcv)
+confusionMatrix(predict_nb1, data_hcv$Baselinehistological.staging)
+
+
+#KNN
+library(class)
+model_knn1<- knn(data_hcv, data_hcv, cl=data_hcv$Baselinehistological.staging, k=4)
+confusionMatrix(model_knn1, data_hcv$Baselinehistological.staging)
+```
+
+
+Model Construction and Evaluation, model tuning, test train dataset, feature addition (Data Engineering)
+
+
+```{r}
+#New feature creation
+#1&2 are assigned to Baseline histological staging of the data wherein 1 stands for mild fibrosis and 2 stands for severe fibrosis. 
+#The whole dataset is taken into consideration before dividing the dataset into training and testing samples.
+set.seed(12345)
+data_hcv$Baselinehistological.staging <- as.factor(ifelse(data_hcv$Baselinehistological.staging == 1 | data_hcv$Baselinehistological.staging == 2, 1, 2))
+
+#Holdout method accuracy evaluation with 2 classes- training and testing dataset is created
+
+#Since collinearity isn't seen in the data, holdout is taken into consideration
+sample1<- sample(nrow(data_hcv), 0.90*nrow(data_hcv))
+data_hcv.train <- data_hcv[sample1,]
+data_hcv.test <- data_hcv[-sample1,]
+
+#for models that need tuning
+#Tuning of models with training and testing dataset taken into consideration and for checking accuracy
+model_nb<- naiveBayes(Baselinehistological.staging ~., data = data_hcv.train) 
+predict1 <- predict(model_nb, data_hcv.test)
+confusionMatrix(predict1, data_hcv.test$Baselinehistological.staging)
+
+
+model <- knn(data_hcv.train, data_hcv.test, cl=data_hcv.train$Baselinehistological.staging, k=4)
+confusionMatrix(model, data_hcv.test$Baselinehistological.staging)
+
+
+library(e1071)
+library(caret)
+model_svm<- svm(Baselinehistological.staging ~., data = data_hcv.train)
+predict_svm<- predict(model_svm, data_hcv.test)
+confusionMatrix(predict_svm, data_hcv.test$Baselinehistological.staging)
+
+library(party)
+model_dtree<- ctree(Baselinehistological.staging ~., data = data_hcv.train)
+predict_dtree<- predict(model_dtree, data_hcv.test)
+confusionMatrix(predict_dtree, data_hcv.test$Baselinehistological.staging)
+
+#Neural net is also created and evaluated. (Other category from the rubric)
+library(neuralnet)
+
+test_nn <- data_hcv.test
+train_nn <- data_hcv.train
+
+train_nn$Baselinehistological.staging <- as.numeric(train_nn$Baselinehistological.staging)
+test_nn$Baselinehistological.staging <- as.numeric(test_nn$Baselinehistological.staging)
+
+model<- neuralnet(Baselinehistological.staging ~., data =train_nn)
+plot(model)
+predict1<- neuralnet::compute(model,test_nn)
+nn.strength<- predict1$net.result
+cor(nn.strength, as.numeric(test_nn$Baselinehistological.staging))
+
+#tuning neural net
+model<- neuralnet(Baselinehistological.staging ~., data = train_nn, hidden = c(5), learningrate =0.0001, rep = 1, threshold = 0.5 )
+plot(model)
+predict1<- neuralnet::compute(model, test_nn)
+nn.strength<- predict1$net.result
+cor(nn.strength, as.numeric(test_nn$Baselinehistological.staging))
+
+
+#Regression model is also constructed
+model <- glm(Baselinehistological.staging ~., data = data_hcv.train, family = c("binomial"))
+predict1 <- predict(model, data_hcv.test)
+predict1 <- as.factor(ifelse(predict1>0.5, 2,1))
+confusionMatrix(predict1, data_hcv.test$Baselinehistological.staging)
+summary(model)
+ideal.mod.ref<- step(model, direction = "backward")
+summary(ideal.mod.ref)
+pred.glm<- predict(ideal.mod.ref, data_hcv.test, type = "response")
+pred.glm <- as.factor(ifelse(pred.glm>0.5, 2,1))
+confusionMatrix(pred.glm, data_hcv.test$Baselinehistological.staging)
+```
+
+
+
+Interpretation and Results of the models created
+
+
+
+```{r}
+#SVM Accuracy when whole dataset is considered- 73.94%
+
+#Decision Tree Accuracy when whole dataset is considered- 26.14%
+
+#Naive Bayes Accuracy when whole dataset is considered- 33.86%
+
+#KNN Accuracy when whole dataset is considered- 97.98%
+
+
+#SVM Accuracy with train and test dataset- 50.36%
+
+#Decision Tree Accuracy with train and test dataset- 49.64%
+
+#Neural Net Accuracy (after tuning)- 59%
+
+#Regression with train and test dataset- 47%
+#Following this, backtracing is done to extract important features- BMI, Gender, RNA EF and Epigastric Pain. 
+
+```
+
+
+As seen, some models tend to perform better when the whole dataset is considered and some models perform better when the holdout methods (that is when sects of the data are made) which include training and testing dataset are used. Specifically, KNN is well suited for this dataset as it gives us 97% accuracy and SVM tends to perform well with the whole dataset. With tuning which increasing the number of hidden layers adn inserting a learning rate, a neural net is seen to perform better. The accuracy of decision tree is almost doubled as seen once the holdout method is taken into consideration. 
+As far as regression is concerned, it holds an accuracy of 47%. When backtracking is attempted, we understand that columns like BMI, Gender, RNA EF (RNA Elongation factor) and Epigastric pain are the ones which can be considered as significant. These can be considered as markers of disease during disease progression. However, Jaundice, Aspartate Transaminase are other important markers one can considered during disease progression. 
+
+
+
+```{r, warning=FALSE} 
+#Bagging and Boosting is done wherein the possible miscalculations that the models might have done are collected, and weightage is assigned on these miscalculations for proper predictions. 
+#Boosting Algorithms
+library(mlbench)
+library(caret)
+library(caretEnsemble)
+control <- trainControl(method="repeatedcv", number=5, repeats=3)
+seed <- 7
+metric <- "Accuracy"
+# C5.0
+set.seed(seed)
+fit.c50 <- train(Baselinehistological.staging~., data=data_hcv, method="C5.0", metric=metric, trControl=control)
+# Stochastic Gradient Boosting
+set.seed(seed)
+fit.gbm <- train(Baselinehistological.staging~., data=data_hcv, method="gbm", metric=metric, trControl=control, verbose=FALSE)
+# summarize results
+boosting_results <- resamples(list(c5.0=fit.c50, gbm=fit.gbm))
+summary(boosting_results)
+dotplot(boosting_results)
+#An accuracy of close to 0.5 is seen for both gbm and C 5.0
+
+#Bagging
+control <- trainControl(method="repeatedcv", number=5, repeats=3)
+seed <- 7
+metric <- "Accuracy"
+# Bagged CART
+set.seed(seed)
+fit.treebag <- train(Baselinehistological.staging~., data=data_hcv, method="treebag", metric=metric, trControl=control)
+# Random Forest
+set.seed(seed)
+fit.rf <- train(Baselinehistological.staging~., data=data_hcv, method="rf", metric=metric, trControl=control)
+# summarize results
+bagging_results <- resamples(list(treebag=fit.treebag, rf=fit.rf))
+summary(bagging_results)
+dotplot(bagging_results)
+```
+
+
+The accuracy of both random forest and tree bag tend towards 0.5 as seen from the plot. 
+
+
+
+CONCLUSION
+Based on these machine learning models, I attempted on predicting the baseline histological staging of patients based on various factors and I have come to a conclusion that KNN performs the best for this dataset. The accuracy obtained was 97.98% which is very high. This model can be deployed (as per CRISP DM) and can be used by various medical professionals to grade the progression of diseases based on other factors (non-invasive in nature) like BMI, RNA Elongation Factor, ALT ratio, Jaundice and epigastric pain. 
+
+
+References-
+1. https://ieeexplore.ieee.org/document/8289800
